@@ -1,9 +1,22 @@
 #include <iostream>
 #include <stdlib.h>
 #include <portaudio.h>
+#include <fftw3.h>
 
 #define NUM_CHANNELS 2
 #define FRAMES_PER_BUFFER 512
+#define SPECTRO_FREQUENCY_START 20
+#define SPECTRO_FREQUENCY_END 20000 // Hertz
+
+typedef struct streamCallbackData {
+    double* in;
+    double* out;
+    fftw_plan p;
+    int startIndex;
+    int spectroSize;
+};
+
+static streamCallbackData* spectroData;
 
 
 static int patestCallback(const void* inputBuffer, void* outputBuffer, unsigned long framesPerBuffer,
@@ -12,14 +25,14 @@ static int patestCallback(const void* inputBuffer, void* outputBuffer, unsigned 
     float* in = (float*)inputBuffer;
     (void)outputBuffer;
 
+    streamCallbackData* callbackData = (streamCallbackData*) userData;
+
     int dispSize = 100;
     
 
     float vol_l = 0;
     float vol_r = 0; 
 
-    double in_time = timeInfo->inputBufferAdcTime; // Time at which input was received
-    std::cout << in_time << "\r";
     for(uint i = 0; i < NUM_CHANNELS*FRAMES_PER_BUFFER; i+=2) {
         vol_l =  vol_l > abs(in[i]) ? vol_l : abs(in[i]);
         vol_r =  vol_r > abs(in[i+1]) ? vol_r : abs(in[i+1]);
@@ -57,7 +70,12 @@ int main(int nargs, char* argv[]) {
 
 
     std::cout << "Number of devices: " << audioDevices << std::endl;
-    
+    spectroData = new streamCallbackData;
+    spectroData->in = new double[FRAMES_PER_BUFFER];
+    spectroData->out = new double[FRAMES_PER_BUFFER];
+
+    spectroData->p = fftw_plan_r2r_1d(FRAMES_PER_BUFFER, spectroData->in, spectroData->out, FFTW_R2HC, FFTW_ESTIMATE);
+
     const PaDeviceInfo* deviceInfo;
     int selected_device;
     int sample_rate;
@@ -89,7 +107,7 @@ int main(int nargs, char* argv[]) {
     PaStream* stream;
     PaError err = Pa_OpenStream(&stream, &input_params, &output_params, 
         sample_rate, FRAMES_PER_BUFFER, paNoFlag, 
-        patestCallback, NULL
+        patestCallback, spectroData
         );
 
     if( err != paNoError) {
@@ -103,4 +121,8 @@ int main(int nargs, char* argv[]) {
 
     Pa_Terminate();
     std::cout << "\r";
+    fftw_destroy_plan(spectroData->p);
+    fftw_free(spectroData->in);
+    fftw_free(spectroData->out);
+    delete spectroData;
 }
